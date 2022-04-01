@@ -1,7 +1,3 @@
-local _inspect = require('inspect')
-local inspect = function(root) return _inspect(root, {indent = '   |', depth = 8}) end;
-
-
 ---@class ClassObject
 ---@field super nil|table:ClassObject @Class Context: The super class that this class extends from.  |  Instance Contenxt: The parent instance that this instance inherits from.
 ---@field class nil|table:ClassObject @The class that this instance has been created from. Only available in instance context.
@@ -96,10 +92,11 @@ do
         local __index = setmetatable({ class = parentClass; super = parentInstance }, { __index = function(instance, key)
             if (rawget(parentClass, key)) then return parentClass[key] end; -- First check the class of the instance for the indexed key.
 
-            --Go up the chain of inherited instance tables to find the indexed key, but never accessing the class of the inherited instances.
+            --Go up the chain of inherited instance tables to find the indexed key. Only pull from the class of the inherited instance if the indexed key is a function.
             local super = parentInstance
             while super do
                 if (rawget(super, key)) then return rawget(super, key) end;
+                if (rawget(super.class, key) and type(rawget(super.class, key)) == "function") then return rawget(super.class, key) end;
                 super = super.super or nil;
             end;
 
@@ -117,3 +114,7 @@ do
 
 
 end;
+
+---@type ClassObject;
+local ClassStructure = ClassObject;
+return ClassStructure;
