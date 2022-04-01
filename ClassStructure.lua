@@ -1,180 +1,119 @@
---------------------------------------------------------------------------------------
---
--- > Create a new class structure using:
--- ClassNameA = Object:Extend("ClassNameA")
---
---
--- > Define the class constructor:
--- function ClassNameA:constructor()
---   local newInstance = {
---     -- fields
---   }
---   return newInstance;
--- end;
---
---
--- > Extend an existing class:
--- ClassNameB = ClassNameA:Extend("ClassNameB")
---
--- function ClassNameB:constructor()
---   local newInstance = {
---     -- fields
---   }
---   return newInstance, self.super();  <--- Second argument is the parent instance - can be the super constructor call.
--- end;
---
---
--- > User-defined meta methods:
--- ClassNameA = Object:Extend("ClassNameA", {
---   __tostring? = function(self) return self.value end;  <--- By default, __string will return "[object: ClassName]".
---   __concat? = function(prefix, self) return string.format("%s%s", prefix, tostring(self)) end;  <--- By default, __concat will call __tostring on the object.
--- })
---
---------------------------------------------------------------------------------------
+local _inspect = require('inspect')
+local inspect = function(root) return _inspect(root, {indent = '   |', depth = 8}) end;
 
----@class Object @The base class that sets the framework for extending classes.
-local _Object = {};
 
--- A metatable factory for new classes and class instances.
-local Object_MetaFactory = {};
+---@class ClassObject
+---@field super nil|table:ClassObject @Class Context: The super class that this class extends from.  |  Instance Contenxt: The parent instance that this instance inherits from.
+---@field class nil|table:ClassObject @The class that this instance has been created from. Only available in instance context.
+local ClassObject = {};
 
----@class Object_UserMeta
----@field __tostring? function
----@field __concat? function
+do
 
----Extend a class. (Static Method)
----@param self Object @The class to extend from.
----@param type string @The new class name.
----@param meta? Object_UserMeta @The custom metamethods for the class.
----@return Object @A new class table of your type, extending the parent class.
-function _Object:Extend(type, meta)
-    if (self:isInstance()) then error("Extending an instance of a class is not supposed by this function. Extend from classes only.") end;
-    return setmetatable({ super = self }, Object_MetaFactory.createClass(self, type, meta))
-end;
+    local ClassObject_MetaFactory = {};
 
----Check if the table object is in the context of a class.
----@return boolean @Returns true if the table object is in class context; false if instance context.
-function _Object:isClass()
-    return getmetatable(self).__class == nil;
-end
+    -- Global Functions -------------------------------------
 
----Check if the table object is in the context of a class instance.
----@return boolean @Returns true if the table object is in class instance context; false if class context.
-function _Object:isInstance()
-    return not self:isClass();
-end
+    function ClassObject:Extend(className, meta)
+        meta = meta or {};
+        return setmetatable({}, ClassObject_MetaFactory.createClass(self, className, meta));
+    end;
 
----Check if this object is an instance of the specified class. (Instance Method)
----@param class Object
----@return boolean
-function _Object:instanceOf(class)
-    local meta = getmetatable(self);
-    while meta do
-        if (meta["__type"] and (meta.__type == getmetatable(class).__type)) then return true end;
----@diagnostic disable-next-line: undefined-field
-        meta = getmetatable(self.super);
-    end
-    return false;
-end;
+    function ClassObject:type()
+        return getmetatable(self).__type;
+    end;
 
----Get the parent class of this instance. (Instance Method)
----@param self Object
----@return Object
-function _Object:class()
-    return getmetatable(self).__class;
-end;
+    function ClassObject:isClass()
+        return self.class ~= nil;
+    end;
 
----Get the object type name. (Instance Method)
----@param self Object
----@return string
-function _Object:type()
-    return getmetatable(self).__type;
-end;
+    function ClassObject:isInstance()
+        return not self:isClass();
+    end;
 
-local globalMethods = {
+    function ClassObject:instanceOf(class)
+        local super = self;
+        while super do
+            if (getmetatable(super)['__type'] and (getmetatable(super)['__type'] == getmetatable(class).__type)) then return true end;
+            super = super.super;
+        end
+        return false;
+    end;
 
-    Extend = _Object.Extend; -- Class Method
-    instanceOf = _Object.instanceOf; -- Instance Method
-    class = _Object.class; -- Instance Method
-    type = _Object.type; -- Instance Method
-}
+    ----------------------------------------------------------
 
-local Object_BaseMeta = {
-    __tostring = function(self) return string.format("[object: %s]", getmetatable(self).__type) end;
-    __concat = function(prefix, self) return string.format("%s%s", prefix, tostring(self)) end;
-    __index = globalMethods;
-    __type = "Object";
-};
-setmetatable(_Object, Object_BaseMeta);
 
--- Handle calls for __tostring on a class or instance of a class.
----@param tableObject Object
----@param userMeta? Object_UserMeta
----@return string
-local function objectToString(tableObject, userMeta)
-    userMeta = userMeta or {};
-    if (tableObject:isClass()) then return string.format("[object: %s]", getmetatable(tableObject).__type) end; -- Is in a class context - return __type.
-    return (userMeta["__tostring"]) and userMeta.__tostring(tableObject) or string.format("[object: %s]", getmetatable(tableObject).__type); -- Is in an instance context - call user-defined __tostring.
-end;
+    local ClassObject_BaseMeta = {
+        __type = "Object";
+        __userMeta = {
+            __tostring = function(object) return string.format("[object %s]", object:type()) end;
+            __concat = function(prefix, object) return string.format("%s%s", prefix, tostring(object)) end;
+        };
+    };
+    setmetatable(ClassObject, ClassObject_BaseMeta);
 
----Handle calls for __tostring on a class or instance of a class.
----@param prefix string
----@param tableObject Object
----@param userMeta? Object_UserMeta
----@return string
-local function objectConcat(prefix, tableObject, userMeta)
-    userMeta = userMeta or {};
-    if (tableObject:isClass()) then return string.format("%s%s", prefix, tostring(tableObject)) end; -- Is in a class context - return tostring() on the called on the class.
-    return (userMeta["__concat"]) and userMeta.__concat(prefix, tableObject) or string.format("%s%s", prefix, tostring(tableObject)); -- Is in an instance context - call user-defined __tostring.
-end;
+    ---Create the meta table for a new class.
+    ---@return table
+    function ClassObject_MetaFactory.createClass(parentClass, className, userMeta)
 
----Create the metatable for the new class.
----@param parentClass Object @The parent class this class is extending from.
----@param classType string @The name & type of the new class.
----@param userMeta? Object_UserMeta @User-defined meta methods.
----@return Object
-function Object_MetaFactory.createClass(parentClass, classType, userMeta)
-    userMeta = userMeta or {};
-    return {
-        __tostring = function(self) return objectToString(self, userMeta) end;
-        __concat = function(prefix, object) return objectConcat(prefix, object, userMeta) end;
-        __index = parentClass;
-        __userMeta = userMeta;
-        __type = classType;
-        __call = function(self, ...)
-            local newObject, parentObject;
-            if (self['constructor']) then newObject, parentObject = self:constructor(...) end;
-            local newObjectMeta = Object_MetaFactory.createClassInstance(self, parentObject);
+        local __userMeta = setmetatable(userMeta or {}, { __index = getmetatable(parentClass).__userMeta });
+        local __index = setmetatable({ super = parentClass }, { __index = parentClass }); -- Define the field 'super' as a reference to the parentClass.
 
-            if (not newObject) then return setmetatable({ super = (parentObject) and parentObject or nil , ...}, newObjectMeta) end; -- Constructor was called, but has not been defined. Return {...} and assign super if parentObject is not nil.
-            if (newObject) then
-                newObject.super = parentObject or nil;
-                newObjectMeta.__index = parentObject or newObjectMeta.__index;
-                return (parentObject) and setmetatable(newObject, newObjectMeta) or setmetatable(newObject, newObjectMeta); -- Parent object was nil, or not a table. Assign the default metatable.
+        local __call = function(class, ...)
+            local newInstance, parentInstance
+            if (class['constructor']) then newInstance, parentInstance = class:constructor(...) end;
+
+            if (newInstance == nil) then error(string.format("No constructor defined for class '%s', or the return value was nil.", class:type())) end; -- If the class constructor is undefined or returns nil, throw an error.
+            if (type(newInstance) ~= 'table') then error(string.format("The constructor for class '%s' must return a table value. Actual type: '%s'.", class:type(), type(newInstance))) end; -- If the class constructor returned a non-table value.
+
+            if (parentInstance == nil) then
+                if (class.super ~= ClassObject) then parentInstance = class.super and class.super(...) or nil end; -- No parent was defined. Call super() if it exists, unless it's our base - ClassObject.
+            else
+                if (type(parentInstance) ~= 'table') then error(string.format("The constructor for class '%s' must return a table value or nil as its parent instance. Actual type: '%s'.", class:type(), type(parentInstance))) end; -- If the class constructor returned a non-table value as the parent instance.
+                parentInstance = parentInstance;
             end;
+            local newInstanceMeta = ClassObject_MetaFactory.createClassInstance(class, parentInstance);
+
+            return setmetatable(newInstance, newInstanceMeta);
         end;
-    };
+
+        return {
+            __type = className;
+            __userMeta = __userMeta;
+            __index = __index; -- Lookup any missing fields in the parent class.
+            __call = __call;
+
+            -- Just use the base tostring/concat methods for classes because I'm too lazy to make something special for class/instance calls.
+            __tostring = ClassObject_BaseMeta.__userMeta.__tostring;
+            __concat = ClassObject_BaseMeta.__userMeta.__concat;
+
+        };
+    end;
+
+    ---Create the meta table for a new instance of a class.
+    ---@return table
+    function ClassObject_MetaFactory.createClassInstance(parentClass, parentInstance)
+
+        local __index = setmetatable({ class = parentClass; super = parentInstance }, { __index = function(instance, key)
+            if (rawget(parentClass, key)) then return parentClass[key] end; -- First check the class of the instance for the indexed key.
+
+            --Go up the chain of inherited instance tables to find the indexed key, but never accessing the class of the inherited instances.
+            local super = parentInstance
+            while super do
+                if (rawget(super, key)) then return rawget(super, key) end;
+                super = super.super or nil;
+            end;
+
+            return ClassObject[key]; -- No such inherited field was found. Check the glocal methods.
+        end});
+
+        return {
+            __type = getmetatable(parentClass).__type;
+            __index = __index;
+
+            __tostring = getmetatable(parentClass).__userMeta.__tostring;
+            __concat = getmetatable(parentClass).__userMeta.__concat;
+        };
+    end;
+
+
 end;
-
----Create a metatable for a new instance of our class.
----@param class Object @The class that the instance is being created from. (E.g. Class: Vehicle)
----@param parentInstance any @An instance of another class to extend. (E.g. Instance of class Car extending Vehicle: toyota)
----@return Object
-function Object_MetaFactory.createClassInstance(class, parentInstance)
-    local classMeta, parentClassMeta = getmetatable(class), (parentInstance and getmetatable(parentInstance:class()) or nil);
-
-    return {
-
-        -- Check if the class has a user-defined meta method. If it doesn't, inherit from the extended class.
-        __tostring = (parentClassMeta) and ((classMeta.__userMeta["__tostring"]) and classMeta.__tostring or parentClassMeta.__tostring) or classMeta.__tostring;
-        __concat = (parentClassMeta) and ((classMeta.__userMeta["__concat"]) and classMeta.__concat or parentClassMeta.__concat) or classMeta.__concat;
-
-        __index = parentInstance or class;
-
-        __class = class;
-        __type = getmetatable(class).__type;
-    };
-end
-
-local ClassStructure = _Object;
-return ClassStructure;
